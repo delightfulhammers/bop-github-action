@@ -1,0 +1,123 @@
+name: 'bop Code Review'
+description: 'AI-powered code review for pull requests'
+author: 'Delightful Hammers'
+
+branding:
+  icon: 'code'
+  color: 'purple'
+
+inputs:
+  base-ref:
+    description: 'Base branch to compare against'
+    required: false
+    default: 'main'
+  post-findings:
+    description: 'Post findings as PR review comments'
+    required: false
+    default: 'true'
+  reviewers:
+    description: 'Comma-separated list of reviewers to use'
+    required: false
+    default: ''
+  block-threshold:
+    description: 'Minimum severity to request changes (critical, high, medium, low, none)'
+    required: false
+    default: 'none'
+  fail-on-findings:
+    description: 'Fail the action if findings exceed block-threshold'
+    required: false
+    default: 'false'
+  always-block-categories:
+    description: 'Comma-separated categories that always block (e.g., security,bug)'
+    required: false
+    default: ''
+  version:
+    description: 'bop version to install (e.g., v0.1.0, latest)'
+    required: false
+    default: 'latest'
+  github-token:
+    description: 'GitHub token for posting review comments'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  findings-count:
+    description: 'Total number of findings'
+    value: ${{ steps.review.outputs.findings-count }}
+  critical-count:
+    description: 'Number of critical severity findings'
+    value: ${{ steps.review.outputs.critical-count }}
+  high-count:
+    description: 'Number of high severity findings'
+    value: ${{ steps.review.outputs.high-count }}
+  medium-count:
+    description: 'Number of medium severity findings'
+    value: ${{ steps.review.outputs.medium-count }}
+  low-count:
+    description: 'Number of low severity findings'
+    value: ${{ steps.review.outputs.low-count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate context
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" != "pull_request" ]; then
+          echo "::error::This action only supports pull_request events (got: ${{ github.event_name }})"
+          exit 1
+        fi
+
+    - name: Install bop
+      shell: bash
+      env:
+        BOP_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        # Determine version
+        VERSION="${BOP_VERSION}"
+        if [ "$VERSION" = "latest" ]; then
+          VERSION=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/delightfulhammers/bop/releases/latest | \
+            jq -r '.tag_name')
+        fi
+
+        echo "Installing bop ${VERSION}..."
+
+        # Detect OS and architecture
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) ARCH="amd64" ;;
+          aarch64|arm64) ARCH="arm64" ;;
+        esac
+
+        # Download and extract
+        VERSION_NUM="${VERSION#v}"
+        ARCHIVE="bop_${VERSION_NUM}_${OS}_${ARCH}.tar.gz"
+        DOWNLOAD_URL="https://github.com/delightfulhammers/bop/releases/download/${VERSION}/${ARCHIVE}"
+
+        mkdir -p "${RUNNER_TEMP}/bop-bin"
+        curl -fsSL "$DOWNLOAD_URL" | tar -xz -C "${RUNNER_TEMP}/bop-bin" bop
+        chmod +x "${RUNNER_TEMP}/bop-bin/bop"
+
+        echo "${RUNNER_TEMP}/bop-bin" >> "$GITHUB_PATH"
+        "${RUNNER_TEMP}/bop-bin/bop" version
+
+    - name: Run review
+      id: review
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_ACTIONS: 'true'
+        GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
+        GITHUB_PR_SHA: ${{ github.event.pull_request.head.sha }}
+        BOP_BASE_REF: ${{ inputs.base-ref }}
+        BOP_POST_FINDINGS: ${{ inputs.post-findings }}
+        BOP_REVIEWERS: ${{ inputs.reviewers }}
+        BOP_BLOCK_THRESHOLD: ${{ inputs.block-threshold }}
+        BOP_FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+        BOP_ALWAYS_BLOCK_CATEGORIES: ${{ inputs.always-block-categories }}
+      run: bop github-action
