@@ -13,6 +13,8 @@ on:
 
 jobs:
   review:
+    # Skip fork PRs: secrets (API keys) are not available to fork PRs
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read

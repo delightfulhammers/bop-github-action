@@ -68,6 +68,11 @@ runs:
           exit 1
         fi
 
+        # Warn if running on a fork PR — secrets (API keys) are not available
+        if [ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]; then
+          echo "::warning::Fork PR detected. Repository secrets (API keys) are not available to fork PRs. The review will likely fail. Add 'if: github.event.pull_request.head.repo.full_name == github.repository' to your job to skip fork PRs."
+        fi
+
     - name: Install bop
       shell: bash
       env:
